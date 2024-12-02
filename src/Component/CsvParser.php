@@ -100,7 +100,7 @@ class CsvParser implements \Iterator {
      */
     public static function createFromString($string) {
         $handle = fopen('php://temp', 'w+b');
-        $string = iconv(mb_detect_encoding($string, mb_detect_order(), true), "UTF-8", $string);
+
         fwrite($handle, $string);
         fseek($handle, 0);
 
