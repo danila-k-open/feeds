@@ -90,6 +90,27 @@ class CsvParser implements \Iterator {
   }
 
   /**
+   * Creates a CsvParser object from a file path.
+   *
+   * @param string $filepath
+   *   The file path.
+   *
+   * @return \Drupal\feeds\Component\CsvParser
+   *   A new CsvParser object.
+   */
+
+  public static function convertToUtf8($string) {
+    mb_detect_order(['UTF-8', 'WINDOWS-1251', 'ISO-8859-1', 'ISO-8859-15', 'KOI8-R', 'CP1251']);
+
+    $encoding = mb_detect_encoding($string, mb_detect_order(), true);
+
+    if ($encoding && $encoding !== "UTF-8") {
+        $string = iconv($encoding, "UTF-8", $string);
+    }
+
+    return $string;
+  }
+  /**
    * Creates a CsvParser object from a string.
    *
    * @param string $string
@@ -100,8 +121,8 @@ class CsvParser implements \Iterator {
    */
   public static function createFromString($string) {
     $handle = fopen('php://temp', 'w+b');
-
-    fwrite($handle, $string);
+    $utf8_string = self::convertToUtf8($string);
+    fwrite($handle, $utf8_string);
     fseek($handle, 0);
 
     return new static($handle);
@@ -152,7 +173,8 @@ class CsvParser implements \Iterator {
     $prev = ftell($this->handle);
 
     rewind($this->handle);
-    $header = $this->parseLine($this->readLine());
+    $line = $this->readLine();
+    $header = $this->parseLine(self::convertToUtf8($line));
     fseek($this->handle, $prev);
 
     return $header;
@@ -209,17 +231,18 @@ class CsvParser implements \Iterator {
 
     do {
       $line = $this->readLine();
+      $utf8_line = self::convertToUtf8($line);
 
       // End of file.
-      if ($line === FALSE) {
+      if ($utf8_line === FALSE) {
         $this->currentLine = FALSE;
         return;
       }
 
       // Skip empty lines that aren't wrapped in an enclosure.
-    } while (!strlen(rtrim($line, "\r\n")));
+    } while (!strlen(rtrim($utf8_line, "\r\n")));
 
-    $this->currentLine = $this->parseLine($line);
+    $this->currentLine = $this->parseLine($utf8_line);
     $this->linesRead++;
   }
 
@@ -230,7 +253,9 @@ class CsvParser implements \Iterator {
     rewind($this->handle);
 
     if ($this->hasHeader && !$this->startByte) {
-      $this->parseLine($this->readLine());
+      $line = $this->readLine();
+      $utf8_line = self::convertToUtf8($line);
+      $this->parseLine($utf8_line);
     }
     elseif ($this->startByte) {
       fseek($this->handle, $this->startByte);
@@ -275,58 +300,41 @@ class CsvParser implements \Iterator {
    * @return array
    *   The list of cells in the CSV row.
    */
-  protected function parseLine($line, $in_quotes = FALSE, $field = '', array $fields = []) {
-    $line_length = strlen($line);
-
-    // Traverse the line byte-by-byte.
-    for ($index = 0; $index < $line_length; ++$index) {
-      $byte = $line[$index];
-      $next_byte = $line[$index + 1] ?? '';
-
-      // Beginning a quoted field.
-      if ($byte === '"' && $field === '' && !$in_quotes) {
-        $in_quotes = TRUE;
-      }
-      elseif ($byte === '"' && $next_byte !== '"' && $in_quotes) {
-        $in_quotes = FALSE;
-      }
-      // Found an escaped double quote.
-      elseif ($byte === '"' && $next_byte === '"' && $in_quotes) {
-        $field .= '"';
-        // Skip the next quote.
-        ++$index;
-      }
-
-      // Ending a field.
-      elseif (!$in_quotes && $byte === $this->delimiter) {
-        $fields[] = $field;
+    protected function parseLine($line) {
+        $utf8_line = self::convertToUtf8($line);
+        $fields = [];
         $field = '';
-      }
+        $in_quotes = false;
+        $line_length = mb_strlen($utf8_line);
 
-      // End of this line.
-      elseif (!$in_quotes && $next_byte === '') {
-        $fields[] = $this->trimNewline($byte, $field);
-        $field = '';
-      }
-      else {
-        $field .= $byte;
-      }
+        for ($index = 0; $index < $line_length; ++$index) {
+            $byte = mb_substr($utf8_line, $index, 1);
+            $next_byte = mb_substr($utf8_line, $index + 1, 1);
+
+            if ($byte === '"' && $field === '' && !$in_quotes) {
+                $in_quotes = true;
+            } elseif ($byte === '"' && $next_byte !== '"' && $in_quotes) {
+                $in_quotes = false;
+            } elseif ($byte === '"' && $next_byte === '"' && $in_quotes) {
+                $field .= '"';
+                ++$index; // Пропускаем следующий символ
+            } elseif (!$in_quotes && $byte === $this->delimiter) {
+                $fields[] = $field;
+                $field = '';
+            } elseif (!$in_quotes && $next_byte === '') {
+                $fields[] = $this->trimNewline($byte, $field);
+                $field = '';
+            } else {
+                $field .= $byte;
+            }
+        }
+
+        if (!$in_quotes && $field) {
+            $fields[] = $field;
+        }
+
+        return $fields;
     }
-
-    // If we're still in quotes after the line is read, continue reading on the
-    // next line. Check that we're not at the end of a malformed file.
-    if ($in_quotes && $line = $this->readLine()) {
-      $fields = $this->parseLine($line, $in_quotes, $field, $fields);
-    }
-
-    // If we're not in quoted after the line is read but the field contains
-    // data, we are processing a line that did not end.
-    if (!$in_quotes && $field) {
-      $fields[] = $field;
-    }
-
-    return $fields;
-  }
 
   /**
    * Removes the trailing line ending.
