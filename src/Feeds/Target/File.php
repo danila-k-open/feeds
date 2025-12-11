@@ -262,16 +262,26 @@ class File extends EntityReference {
    *   In case the file extension is not valid.
    */
   protected function getFileName($url) {
+    $query_string = parse_url($url, PHP_URL_QUERY);
+    
+    // Проверяем, что query_string не null и не пустая строка
+    if (!empty($query_string)) {
+        parse_str($query_string, $params);
+        if (isset($params['filename'])) {
+            return urldecode($params['filename']);
+        }
+    }
+    
     $filename = trim(basename($url), " \t\n\r\0\x0B.");
     // Remove query string from file name, if it has one.
     [$filename] = explode('?', $filename);
     $extension = substr($filename, strrpos($filename, '.') + 1);
 
     if (!preg_grep('/' . $extension . '/i', $this->fileExtensions)) {
-      throw new TargetValidationException($this->t('The file, %url, failed to save because the extension, %ext, is invalid.', [
-        '%url' => $url,
-        '%ext' => $extension,
-      ]));
+        throw new TargetValidationException($this->t('The file, %url, failed to save because the extension, %ext, is invalid.', [
+            '%url' => $url,
+            '%ext' => $extension,
+        ]));
     }
 
     return $filename;
