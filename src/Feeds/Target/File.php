@@ -263,12 +263,14 @@ class File extends EntityReference {
    */
   protected function getFileName($url) {
     $query_string = parse_url($url, PHP_URL_QUERY);
-    parse_str($query_string, $params);
-    if(!empty($params['filename'])){
-        return urldecode($params['filename'] ?? '');
+    if (!empty($query_string)) {
+      parse_str($query_string, $params);
+      if (isset($params['filename'])) {
+        return urldecode($params['filename']);
+      }
     }
+    
     $filename = trim(basename($url), " \t\n\r\0\x0B.");
-    // Remove query string from file name, if it has one.
     [$filename] = explode('?', $filename);
     $extension = substr($filename, strrpos($filename, '.') + 1);
 
